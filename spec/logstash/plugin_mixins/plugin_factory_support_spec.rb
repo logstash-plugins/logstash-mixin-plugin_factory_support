@@ -89,10 +89,12 @@ describe LogStash::PluginMixins::PluginFactorySupport do
               it 'returns a plugin factory' do
                 pf = instance.plugin_factory
 
-                expect(pf).to respond_to(:input)
-                expect(pf).to respond_to(:output)
-                expect(pf).to respond_to(:codec)
-                expect(pf).to respond_to(:filter)
+                aggregate_failures do
+                  expect(pf).to respond_to(:input)
+                  expect(pf).to respond_to(:output)
+                  expect(pf).to respond_to(:codec)
+                  expect(pf).to respond_to(:filter)
+                end
               end
 
               context 'PluginFactory' do
@@ -107,22 +109,89 @@ describe LogStash::PluginMixins::PluginFactorySupport do
                 end
 
                 before(:each) do
-                  expect(instance).to receive(:execution_context).and_return(execution_context)
+                  expect(instance).to receive(:execution_context).and_return(execution_context).at_least(:once)
                 end
 
-                describe '#codec(plain).new("format" => "foo/bar")' do
-                  it 'creates a contextualized instance' do
-                    plain_codec_factory = instance.plugin_factory.codec('plain')
-                    product = plain_codec_factory.new("format" => "foo/bar")
+                describe '#codec("plain").new' do
+                  let(:plain_codec_factory) { instance.plugin_factory.codec('plain') }
 
-                    aggregate_failures('standard params parsing') do
-                      expect(product).to be_a_kind_of(::LogStash::Codecs::Plain)
-                      expect(product.format).to eq("foo/bar")
-                    end
+                  let(:inner_params) { Hash.new }
 
-                    aggregate_failures('contextualizing') do
-                      expect(product.execution_context).to be(execution_context) # propagate!
+                  subject(:inner_plugin) { plain_codec_factory.new(inner_params) }
+
+                  shared_examples 'contextualized instance' do
+                    it 'has access to the execution_context' do
+                      expect(inner_plugin).to have_attributes(execution_context: execution_context)
                     end
+                  end
+
+                  shared_examples 'params propagation' do
+                    it 'propagates the explicitly-passed parameters' do
+                      expect(inner_plugin).to have_attributes(original_params: a_hash_including(inner_params))
+                    end
+                  end
+
+                  shared_examples 'sensible generated id' do
+                    it 'has a sensible generated id' do
+                      expect(inner_plugin).to have_attributes(id: a_string_starting_with("#{instance.id}/inner-codec-plain@"))
+                    end
+                    context 'when multiple plugin instances are generated from the same factory' do
+                      subject(:inner_plugins) do
+                        10.times.map do
+                          Thread.new(inner_params.dup) do |isolated_inner_params|
+                            100.times.map do
+                              instance.plugin_factory.codec('plain').new(isolated_inner_params)
+                            end
+                          end
+                        end.map(&:value).flatten
+                      end
+                      it 'generates distinct ids' do
+                        expect(inner_plugins.map(&:id)).to_not contain_duplicates
+                      end
+
+                      matcher :contain_duplicates do
+                        match do |actual|
+                          actual.uniq != actual
+                        end
+                        failure_message_when_negated do |actual|
+                          actual_formatted = RSpec::Support::ObjectFormatter.format(actual)
+                          duplicate_counts = actual.each_with_object(Hash.new{0}) { |id,m| m[id] += 1 }
+                                                   .reject {|value, count| count <= 1 }
+                          "expected #{actual_formatted} to not contain duplicates but found #{duplicate_counts}"
+                        end
+                      end
+                    end
+                  end
+
+                  shared_examples 'explicit id propagation' do
+                    let(:explicit_id) { inner_params.fetch("id") }
+                    it 'propagates the explicitly-given id' do
+                      expect(inner_plugin).to have_attributes(id: explicit_id)
+                    end
+                  end
+
+                  context 'with params `"format" => "foo/bar"`' do
+                    let(:inner_params) { super().merge("format" => "foo/bar") }
+
+                    include_examples "contextualized instance"
+                    include_examples "params propagation"
+                    include_examples "sensible generated id"
+
+                    context 'and explicit id' do
+                      let(:inner_params) { super().merge("id" => "explicitly-given-id") }
+
+                      include_examples "contextualized instance"
+                      include_examples "params propagation"
+                      include_examples "explicit id propagation"
+                    end
+                  end
+
+                  context 'with explicit id' do
+                    let(:inner_params) { super().merge("id" => "explicitly-given-id") }
+
+                    include_examples "contextualized instance"
+                    include_examples "params propagation"
+                    include_examples "explicit id propagation"
                   end
                 end
               end

@@ -1,5 +1,8 @@
 # encoding: utf-8
 
+require 'java'
+require 'thread'
+
 require 'logstash/namespace'
 require 'logstash/plugin'
 
@@ -44,19 +47,27 @@ module LogStash
       #
       # @api internal
       module LegacyAdapter
+        INIT_MUTEX = Mutex.new
+        private_constant :INIT_MUTEX
 
         ##
         # @return [PluginFactory]
         def plugin_factory
-          PluginFactory.new(self)
+          @_plugin_factory || INIT_MUTEX.synchronize do
+            @_plugin_factory ||= PluginFactory.new(self)
+          end
         end
 
         ##
         # A PluginFactory provides methods for retrieving plugin
         # classes that can be initialized with a pre-determined ExecutionContext.
         class PluginFactory
-          def initialize(execution_context_provider)
-            @execution_context_provider = execution_context_provider
+
+          def initialize(outer_plugin)
+            @outer_plugin = outer_plugin
+
+            sequence_id = java.util.concurrent.atomic.AtomicLong.new(0)
+            @sequence_generator = proc { sequence_id.increment_and_get }
           end
 
           %i(
@@ -71,10 +82,21 @@ module LogStash
           end
 
           def execution_context
-            @execution_context_provider.execution_context
+            @outer_plugin.execution_context
+          end
+
+          def outer_plugin_id
+            @outer_plugin.id
+          end
+
+          def next_sequence_id
+            @sequence_generator.call
           end
         end
 
+        ##
+        # A PluginClassProxy responds to `new` with a string-keyed params hash,
+        # and is a proxy for the ruby plugin class associated with its type and name.
         class PluginClassProxy
           def initialize(plugin_factory, plugin_type, plugin_name)
             @plugin_type = plugin_type
@@ -82,10 +104,27 @@ module LogStash
             @plugin_factory = plugin_factory
           end
 
+          ##
+          # Creates an instance of the plugin using the provided parameters
+          # that has access to the factory's execution context.
+          #
+          # If an `id` is not explicitly provided, a sensible one will be generated
+          # indicating its relationship to the plugin in which it was instantiated.
+          #
+          # @param params [Hash{String=>Object}]
+          # @return [LogStash::Plugin]
+          def new(params={})
+            params_with_id = params.include?('id') ? params : params.merge('id' => generate_inner_id)
+
+            initialize_contextualized_plugin(params_with_id)
+          end
+
+          private
+
           if defined?(::LogStash::Plugins::Contextualizer)
 
             # In Logstash 7.10+, we have a contextualizer that pre-injects context
-            def new(params={})
+            def initialize_contextualized_plugin(params)
               ::LogStash::Plugins::Contextualizer.initialize_plugin(@plugin_factory.execution_context, plugin_class, params)
             end
 
@@ -93,8 +132,7 @@ module LogStash
 
             # In older Logstashes, we cannot inject context before initialization happens.
             # so we do our best and inject immediately after initialize is called.
-            def new(params={})
-
+            def initialize_contextualized_plugin(params)
               plugin_class.new(params).tap do |plugin_instance|
                 plugin_instance.execution_context = @plugin_factory.execution_context
               end
@@ -102,10 +140,12 @@ module LogStash
 
           end
 
-          private
-
           def plugin_class
             ::LogStash::Plugin.lookup(@plugin_type, @plugin_name)
+          end
+
+          def generate_inner_id
+            "#{@plugin_factory.outer_plugin_id}/inner-#{@plugin_type}-#{@plugin_name}@#{@plugin_factory.next_sequence_id}"
           end
         end
       end
