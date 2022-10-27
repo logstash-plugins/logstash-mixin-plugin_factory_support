@@ -55,6 +55,11 @@ which hooks into Logstash internals
 
     ~~~
 
+    Note: when instantiating an inner plugin with a plugin factory, managing its lifecycle remains
+    an implementation detail of the _outer_ plugin. Lifecycle events like `LogStash::Plugin#close`,
+    `LogStash::Inputs::Base#stop`, or `LogStash::Codecs::Base#flush` for the outer plugin are not
+    automatically propagated to the inner plugin.
+
 ## Development
 
 This gem:
