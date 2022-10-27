@@ -83,7 +83,21 @@ describe LogStash::PluginMixins::PluginFactorySupport do
 
           context 'when intialized' do
             let(:plugin_options) { Hash.new }
-            subject(:instance) { plugin_class.new(plugin_options) }
+            subject(:instance) do
+              plugin_class.new(plugin_options).tap do |i|
+                i.execution_context = outer_execution_context
+              end
+            end
+
+            let(:outer_execution_context) do
+              # If we are running on a Logstash that has a Plugin Contextualizer,
+              # it needs a real-deal ExecutionContext due to java type-casting.
+              if defined?(::LogStash::Plugins::Contextualizer)
+                ::LogStash::ExecutionContext.new(nil, nil)
+              else
+                double('LogStash::ExecutionContext').as_null_object
+              end
+            end
 
             describe '#plugin_factory' do
               it 'returns a plugin factory' do
@@ -98,19 +112,6 @@ describe LogStash::PluginMixins::PluginFactorySupport do
               end
 
               context 'PluginFactory' do
-                let(:execution_context) do
-                  # If we are running on a Logstash that has a Plugin Contextualizer,
-                  # it needs a real-deal ExecutionContext due to java type-casting.
-                  if defined?(::LogStash::Plugins::Contextualizer)
-                    ::LogStash::ExecutionContext.new(nil, nil)
-                  else
-                    double('LogStash::ExecutionContext').as_null_object
-                  end
-                end
-
-                before(:each) do
-                  expect(instance).to receive(:execution_context).and_return(execution_context).at_least(:once)
-                end
 
                 describe '#codec("plain").new' do
                   let(:plain_codec_factory) { instance.plugin_factory.codec('plain') }
@@ -120,8 +121,9 @@ describe LogStash::PluginMixins::PluginFactorySupport do
                   subject(:inner_plugin) { plain_codec_factory.new(inner_params) }
 
                   shared_examples 'contextualized instance' do
+                    alias_matcher :same_instance_as, :equal
                     it 'has access to the execution_context' do
-                      expect(inner_plugin).to have_attributes(execution_context: execution_context)
+                      expect(inner_plugin).to have_attributes(execution_context: same_instance_as(outer_execution_context))
                     end
                   end
 
@@ -137,6 +139,7 @@ describe LogStash::PluginMixins::PluginFactorySupport do
                     end
                     context 'when multiple plugin instances are generated from the same factory' do
                       subject(:inner_plugins) do
+                        instance # eager init outer instance in main thread
                         10.times.map do
                           Thread.new(inner_params.dup) do |isolated_inner_params|
                             100.times.map do
