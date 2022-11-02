@@ -114,16 +114,25 @@ describe LogStash::PluginMixins::PluginFactorySupport do
               context 'PluginFactory' do
 
                 describe '#codec("plain").new' do
-                  let(:plain_codec_factory) { instance.plugin_factory.codec('plain') }
+                  let(:plain_codec_proxy) { instance.plugin_factory.codec('plain') }
+                  before(:each) do
+                    allow(plain_codec_proxy).to receive(:logger).and_return(double('Logger').as_null_object)
+                  end
 
                   let(:inner_params) { Hash.new }
 
-                  subject(:inner_plugin) { plain_codec_factory.new(inner_params) }
+                  subject(:inner_plugin) { plain_codec_proxy.new(inner_params) }
 
                   shared_examples 'contextualized instance' do
                     alias_matcher :same_instance_as, :equal
                     it 'has access to the execution_context' do
                       expect(inner_plugin).to have_attributes(execution_context: same_instance_as(outer_execution_context))
+                    end
+                    it 'logs a breadcrumb linking the inner plugin to its outer wrapper' do
+                      inner_plugin # eager instantiate
+
+                      expect(plain_codec_proxy.logger).to have_received(:debug).with(a_string_including('initializing inner plain codec'),
+                                                                                     a_hash_including(inner_plugin_id: inner_plugin.id, outer_plugin_id: instance.id))
                     end
                   end
 

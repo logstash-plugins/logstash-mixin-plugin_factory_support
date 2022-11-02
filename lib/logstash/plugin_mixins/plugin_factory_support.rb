@@ -100,6 +100,9 @@ module LogStash
         # A PluginClassProxy responds to `new` with a string-keyed params hash,
         # and is a proxy for the ruby plugin class associated with its type and name.
         class PluginClassProxy
+
+          include LogStash::Util::Loggable
+
           def initialize(plugin_factory, plugin_type, plugin_name)
             @plugin_type = plugin_type
             @plugin_name = plugin_name
@@ -117,6 +120,10 @@ module LogStash
           # @return [LogStash::Plugin]
           def new(params={})
             params_with_id = params.include?('id') ? params : params.merge('id' => generate_inner_id)
+
+            logger.debug("initializing inner #{@plugin_name} #{@plugin_type}",
+                        :outer_plugin_id => @plugin_factory.outer_plugin_id,
+                        :inner_plugin_id => params_with_id.fetch('id'))
 
             initialize_contextualized_plugin(params_with_id)
           end
