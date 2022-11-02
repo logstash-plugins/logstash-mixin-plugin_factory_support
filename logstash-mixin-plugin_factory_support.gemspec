@@ -2,8 +2,8 @@ Gem::Specification.new do |s|
   s.name          = 'logstash-mixin-plugin_factory_support'
   s.version       = '1.0.0'
   s.licenses      = %w(Apache-2.0)
-  s.summary       = "Support for the Plugin Factory introduced in Logstash 8.3, for plugins wishing to use this API on older Logstashes"
-  s.description   = "This gem is meant to be a dependency of any Logstash plugin that wishes to use the Plugin Factory introduced in Logstash 8.3 while maintaining backward-compatibility with earlier Logstash releases. When used on older Logstash versions, this adapter provides an implementation of `Plugin#plugin_factory`"
+  s.summary       = "API-stable Plugin Factory support adapter for Logstash plugins"
+  s.description   = "This gem is meant to be a dependency of any Logstash plugin that wishes to use a Plugin Factory to instantiate inner plugins that are fully-contextualized in the pipeline that the outer plugin is running in"
   s.authors       = %w(Elastic)
   s.email         = 'info@elastic.co'
   s.homepage      = 'https://github.com/logstash-plugins/logstash-mixin-plugin_factory_support'
