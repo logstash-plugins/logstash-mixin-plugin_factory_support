@@ -28,8 +28,8 @@ module LogStash
         fail(ArgumentError, "`#{base}` must inherit LogStash::Plugin") unless base < LogStash::Plugin
 
         # If our base does not include an `plugin_factory`,
-        # include the legacy adapter to ensure it gets defined.      
-        base.send(:include, LegacyAdapter) unless base.method_defined?(:plugin_factory)
+        # prepend the legacy adapter to ensure it gets defined.
+        base.send(:prepend, LegacyAdapter) unless base.method_defined?(:plugin_factory)
       end
 
       ##
@@ -47,15 +47,19 @@ module LogStash
       #
       # @api internal
       module LegacyAdapter
-        INIT_MUTEX = Mutex.new
-        private_constant :INIT_MUTEX
+
+        ##
+        # pre-initialize the sequence generator for id generation
+        def initialize(*a,&b)
+          @_pf_sequence_generator = SequenceGenerator.new
+
+          super
+        end
 
         ##
         # @return [PluginFactory]
         def plugin_factory
-          @_plugin_factory || INIT_MUTEX.synchronize do
-            @_plugin_factory ||= PluginFactory.new(self)
-          end
+          PluginFactory.new(self, @_pf_sequence_generator)
         end
 
         ##
@@ -63,11 +67,9 @@ module LogStash
         # classes that can be initialized with a pre-determined ExecutionContext.
         class PluginFactory
 
-          def initialize(outer_plugin)
+          def initialize(outer_plugin, sequence_generator)
             @outer_plugin = outer_plugin
-
-            sequence_id = java.util.concurrent.atomic.AtomicLong.new(0)
-            @sequence_generator = proc { sequence_id.increment_and_get }
+            @sequence_generator = sequence_generator
           end
 
           %i(
@@ -90,7 +92,7 @@ module LogStash
           end
 
           def next_sequence_id
-            @sequence_generator.call
+            @sequence_generator.next
           end
         end
 
@@ -146,6 +148,23 @@ module LogStash
 
           def generate_inner_id
             "#{@plugin_factory.outer_plugin_id}/inner-#{@plugin_type}-#{@plugin_name}@#{@plugin_factory.next_sequence_id}"
+          end
+        end
+
+
+        ##
+        # A SequenceGenerator will never generate the same sequence id twice.
+        # The shape of the produced string is an implementation detail.
+        class SequenceGenerator
+          def initialize
+            @last_sequence_id = java.util.concurrent.atomic.AtomicLong.new(0)
+          end
+
+          def next
+            sequence_id = @last_sequence_id.increment_and_get
+            fail("OVERFLOW") if sequence_id.zero?
+
+            "#{sequence_id}"
           end
         end
       end
