@@ -130,25 +130,14 @@ module LogStash
 
           private
 
-          if defined?(::LogStash::Plugins::Contextualizer)
-
-            # In Logstash 7.10+, we have a contextualizer that pre-injects context
-            def initialize_contextualized_plugin(params)
-              ::LogStash::Plugins::Contextualizer.initialize_plugin(@plugin_factory.execution_context, plugin_class, params)
-            end
-
-          else
-
-            # In older Logstashes, we cannot inject context before initialization happens.
-            # so we do our best and inject immediately after initialize is called.
-            def initialize_contextualized_plugin(params)
-              plugin_class.new(params).tap do |plugin_instance|
-                plugin_instance.execution_context = @plugin_factory.execution_context
-              end
-            end
-
+          # Reach into the logstash-internal Plugin::Contextualizer provided in Logstash 7.10+
+          # to instantiate the inner plugin with the factory's execution context.
+          def initialize_contextualized_plugin(params)
+            ::LogStash::Plugins::Contextualizer.initialize_plugin(@plugin_factory.execution_context, plugin_class, params)
           end
 
+          # Reach into the logstash-internal Plugin::lookup to find the inner plugin's class
+          # by type and name
           def plugin_class
             ::LogStash::Plugin.lookup(@plugin_type, @plugin_name)
           end

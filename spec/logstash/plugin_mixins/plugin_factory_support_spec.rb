@@ -90,13 +90,9 @@ describe LogStash::PluginMixins::PluginFactorySupport do
             end
 
             let(:outer_execution_context) do
-              # If we are running on a Logstash that has a Plugin Contextualizer,
-              # it needs a real-deal ExecutionContext due to java type-casting.
-              if defined?(::LogStash::Plugins::Contextualizer)
-                ::LogStash::ExecutionContext.new(nil, nil)
-              else
-                double('LogStash::ExecutionContext').as_null_object
-              end
+              # Logstash's Plugin Contextualizer needs a real-deal
+              # ExecutionContext due to java type-casting.
+              ::LogStash::ExecutionContext.new(nil, nil)
             end
 
             describe '#plugin_factory' do
